@@ -1,0 +1,486 @@
+// 主入口 React 组件
+import React, { useState, useEffect } from 'react';
+import { createPortal } from 'react-dom';
+
+const planetTypes = {
+  personal: { label: '个人', color: 'green' },
+  project: { label: '项目', color: 'blue' },
+  organization: { label: '组织', color: 'orange' },
+};
+
+let idCounter = 0;
+const randomPosition = (viewport, existingPositions = []) => {
+  const maxAttempts = 100;
+  const minDistance = 100; // px, 最小间距
+
+  for (let attempt = 0; attempt < maxAttempts; attempt++) {
+    const top = Math.random() * 80 + 10;
+    const left = Math.random() * 80 + 10;
+    const pxTop = (top / 100) * viewport.height;
+    const pxLeft = (left / 100) * viewport.width;
+
+    const overlap = existingPositions.some(pos => {
+      try {
+        if (!pos || typeof pos.top !== 'string' || typeof pos.left !== 'string') return false;
+        const t = parseFloat(pos.top.replace('%', ''));
+        const l = parseFloat(pos.left.replace('%', ''));
+        if (isNaN(t) || isNaN(l)) return false;
+        const pxT = (t / 100) * viewport.height;
+        const pxL = (l / 100) * viewport.width;
+        const dx = pxLeft - pxL;
+        const dy = pxTop - pxT;
+        const distance = Math.sqrt(dx * dx + dy * dy);
+        return distance < minDistance;
+      } catch {
+        return false;
+      }
+    });
+
+    if (!overlap) return { top: `${top}%`, left: `${left}%` };
+  }
+
+  return { top: `50%`, left: `50%` }; // fallback
+};
+
+const planetBgClass = {
+  personal: 'bg-green-500',
+  project: 'bg-blue-500',
+  organization: 'bg-orange-500',
+};
+
+const getCenter = (id) => {
+  const el = document.getElementById(`planet-${id}`);
+  if (!el) return null;
+  const rect = el.getBoundingClientRect();
+  return {
+    x: rect.left + rect.width / 2,
+    y: rect.top + rect.height / 2,
+  };
+};
+
+const App = () => {
+  const [lastClickedPlanet, setLastClickedPlanet] = useState(null);
+  const [currentUser, setCurrentUser] = useState(''); // 模拟当前用户
+  const [viewport, setViewport] = useState({ width: 0, height: 0 });
+  useEffect(() => {
+    setViewport({ width: window.innerWidth, height: window.innerHeight });
+  }, []);
+
+  const [hoveredPlanet, setHoveredPlanet] = useState(null);
+  const [menuOpen, setMenuOpen] = useState(false);
+  const [planets, setPlanets] = useState([]);
+  const [filterType, setFilterType] = useState(null);
+  const [editingPlanet, setEditingPlanet] = useState(null);
+
+  const [planetNames, setPlanetNames] = useState({
+    personal: [],
+    project: [],
+    organization: [],
+  });
+
+  const [form, setForm] = useState({
+    type: '', name: '', values: '', vision: '', mission: '', action: '',
+    projectLinks: [], organizationLinks: [], personalLinks: [],
+  });
+
+  const openEditor = (type) => {
+    setForm({ type, name: '', values: '', vision: '', mission: '', action: '', projectLinks: [], organizationLinks: [], personalLinks: [] });
+    setEditingPlanet(null);
+  };
+
+  const handleSubmit = () => {
+    const vw = window.innerWidth;
+    const vh = window.innerHeight;
+    const width = vw >= 100 ? vw : viewport.width;
+    const height = vh >= 100 ? vh : viewport.height;
+    if (width < 100 || height < 100) return;
+
+    const safeViewport = { width, height };
+    const existingPositions = planets
+      .filter(p => p?.position && typeof p.position.top === 'string' && typeof p.position.left === 'string')
+      .map(p => p.position);
+
+    const newPlanet = {
+      id: idCounter++,
+      owner: currentUser,
+      ...form,
+      position: randomPosition(safeViewport, existingPositions),
+    };
+    setPlanets((prev) => [...prev, newPlanet]);
+    setPlanetNames((prev) => ({ ...prev, [form.type]: [...prev[form.type], form.name] }));
+    openEditor('');
+  };
+
+  return (
+    <div className="w-screen h-screen bg-black text-white relative overflow-hidden" onClick={() => setFilterType(null)}>
+      {hoveredPlanet && (
+        <svg className="absolute inset-0 w-full h-full pointer-events-none z-0">
+          {planets.flatMap(source => {
+            if (source.name !== hoveredPlanet) return [];
+            const links = [
+              ...(source.projectLinks || []),
+              ...(source.organizationLinks || []),
+              ...(source.personalLinks || []),
+            ];
+            return links.map(targetName => {
+              const target = planets.find(p => p.name === targetName);
+              if (!target || !source.position || !target.position) return null;
+              const parse = pos => ({
+                x: parseFloat(pos.left) / 100 * viewport.width + 40,
+                y: parseFloat(pos.top) / 100 * viewport.height + 40,
+              });
+              const from = getCenter(source.id);
+const to = getCenter(target.id);
+              return (
+                <line
+                  key={`${source.id}->${target.id}`}
+                  x1={from.x}
+                  y1={from.y}
+                  x2={to.x}
+                  y2={to.y}
+                  stroke="white"
+                  strokeWidth="1.5"
+                />
+              );
+            }).filter(Boolean);
+          })}
+        </svg>
+      )}
+      <button onClick={() => setMenuOpen(!menuOpen)} className="absolute top-4 left-4 bg-white text-black px-4 py-1 rounded">＋</button>
+      <input
+        type="text"
+        placeholder="用户名（请输入您的姓名全称）"
+        list="user-suggestions"
+        value={currentUser}
+        onChange={(e) => setCurrentUser(e.target.value)}
+        className="absolute top-4 left-20 bg-white text-black px-2 py-1 rounded w-60"
+      />
+      <datalist id="user-suggestions">
+        {[...new Set(planets.map(p => p.owner))].map(user => (
+          <option key={user} value={user} />
+        ))}
+      </datalist>
+
+      {menuOpen && (
+        <div className="absolute top-16 left-4 bg-white text-black p-4 rounded shadow space-y-2">
+          {Object.entries(planetTypes).map(([key, { label }]) => (
+            <div key={key} className={`rounded-lg shadow-sm p-3 border border-${key === 'personal' ? 'green' : key === 'project' ? 'blue' : 'orange'}-200 bg-white/90 backdrop-blur-sm`}>
+  <div className="flex justify-between items-center gap-2">
+    <div className={`flex items-center justify-center text-white text-sm font-bold rounded-full text-xs leading-tight w-12 h-12 ${key === 'personal' ? 'bg-green-500' : key === 'project' ? 'bg-blue-500' : 'bg-orange-500'}`}>{label}</div>
+    
+    <button
+      onClick={() => openEditor(key)}
+      className={`px-2 py-1 text-xs rounded-md font-medium border border-${key === 'personal' ? 'green' : key === 'project' ? 'blue' : 'orange'}-500 text-${key === 'personal' ? 'green' : key === 'project' ? 'blue' : 'orange'}-600 bg-white hover:bg-${key === 'personal' ? 'green' : key === 'project' ? 'blue' : 'orange'}-50 transition`}
+    >新建星球</button>
+    <button
+      onClick={(e) => {
+        e.stopPropagation();
+        setFilterType(filterType === key ? null : key);
+      }}
+      className={`w-20 text-center px-2 py-1 text-xs rounded-md font-medium border border-${key === 'personal' ? 'green' : key === 'project' ? 'blue' : 'orange'}-500 text-${key === 'personal' ? 'green' : key === 'project' ? 'blue' : 'orange'}-600 bg-white hover:bg-${key === 'personal' ? 'green' : key === 'project' ? 'blue' : 'orange'}-50 transition`}
+    >
+      {filterType === key ? planets.filter(p => p.type === key).length + ' 个' : '过滤显示'}
+    </button>
+  </div>
+</div>
+          ))}
+        </div>
+      )}
+
+      {planets
+        .filter(p => !filterType || p.type === filterType)
+        .map((planet) => (
+        <div key={planet.id} id={`planet-${planet.id}`} title={planet.owner === currentUser ? '你可以编辑由您创建的星球' : '该星球由他人创建，仅可查看'} onMouseEnter={() => setHoveredPlanet(planet.name)} onMouseLeave={() => setHoveredPlanet(null)} onClick={() => {
+          if (editingPlanet?.id === planet.id) return; // 防止已打开再点误触
+          if (lastClickedPlanet === planet.name) {
+            setEditingPlanet(planet);
+            setForm(planet);
+            setLastClickedPlanet(null);
+          } else {
+            setHoveredPlanet(planet.name);
+            setLastClickedPlanet(planet.name);
+          }
+        }} className={`rounded-full w-20 h-20 flex items-center justify-center text-sm border-2 border-white absolute ${planetBgClass[planet.type]}`} style={{ top: planet.position?.top || '50%', left: planet.position?.left || '50%' }}>
+          {planet.name.length > 9 ? planet.name.slice(0, 9) + '…' : planet.name}
+        </div>
+      ))}
+
+      {form.type && (
+        <div className="absolute top-1/2 left-1/2 w-96 -translate-x-1/2 -translate-y-1/2 bg-white text-black p-4 rounded shadow space-y-2">
+          <div className="flex justify-between items-center mb-2">
+  <h2 className="text-xl font-bold">{editingPlanet && editingPlanet.owner !== currentUser ? '' : editingPlanet ? '编辑' : '新建'}{planetTypes[form.type]?.label}星球</h2>
+  <button className="text-black text-lg font-bold" onClick={() => openEditor('')}>×</button>
+</div>
+          <input className="w-full p-1 border rounded" placeholder={form.type === 'personal' ? '个人名称' : form.type === 'project' ? '项目名称' : '组织名称'} value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} readOnly={editingPlanet && editingPlanet.owner !== currentUser} />
+          <input className="w-full p-1 border rounded" placeholder="价值观" value={form.values} onChange={(e) => setForm({ ...form, values: e.target.value })} readOnly={editingPlanet && editingPlanet.owner !== currentUser} />
+          <input className="w-full p-1 border rounded" placeholder="愿景" value={form.vision} onChange={(e) => setForm({ ...form, vision: e.target.value })} readOnly={editingPlanet && editingPlanet.owner !== currentUser} />
+          <input className="w-full p-1 border rounded" placeholder="使命" value={form.mission} onChange={(e) => setForm({ ...form, mission: e.target.value })} readOnly={editingPlanet && editingPlanet.owner !== currentUser} />
+          <input className="w-full p-1 border rounded" placeholder="行动" value={form.action} onChange={(e) => setForm({ ...form, action: e.target.value })} readOnly={editingPlanet && editingPlanet.owner !== currentUser} />
+
+          {form.type === 'personal' && (!editingPlanet || editingPlanet.owner === currentUser) && (
+  <>
+    <div>
+      <select
+        className="w-full p-1 border rounded"
+        onChange={(e) => {
+          const val = e.target.value;
+          if (val && !form.projectLinks.includes(val)) {
+            setForm({ ...form, projectLinks: [...form.projectLinks, val] });
+          }
+        }}
+      >
+        <option value="">参与项目</option>
+        {planetNames.project.map((name) => (
+          <option key={name} value={name}>{name}</option>
+        ))}
+      </select>
+      <div className="flex flex-wrap mt-1">
+        {form.projectLinks.map((item, idx) => (
+          <span key={idx} className="bg-gray-300 text-sm m-1 px-2 py-1 rounded">
+            {item}
+            <button
+              className="ml-1 text-red-600"
+              onClick={() => {
+              if (editingPlanet && editingPlanet.owner !== currentUser) return;
+              const updated = form.$1Links.filter((_, i) => i !== idx);
+                setForm({ ...form, projectLinks: updated });
+              }}
+            >×</button>
+          </span>
+        ))}
+      </div>
+    </div>
+    <div>
+      <select
+        className="w-full p-1 border rounded mt-2"
+        onChange={(e) => {
+          const val = e.target.value;
+          if (val && !form.organizationLinks.includes(val)) {
+            setForm({ ...form, organizationLinks: [...form.organizationLinks, val] });
+          }
+        }}
+      >
+        <option value="">所在组织</option>
+        {planetNames.organization.map((name) => (
+          <option key={name} value={name}>{name}</option>
+        ))}
+      </select>
+      <div className="flex flex-wrap mt-1">
+        {form.organizationLinks.map((item, idx) => (
+          <span key={idx} className="bg-gray-300 text-sm m-1 px-2 py-1 rounded">
+            {item}
+            <button
+              className="ml-1 text-red-600"
+              onClick={() => {
+                const updated = form.organizationLinks.filter((_, i) => i !== idx);
+                setForm({ ...form, organizationLinks: updated });
+              }}
+            >×</button>
+          </span>
+        ))}
+      </div>
+    </div>
+  </>
+)}
+
+          {form.type === 'project' && (!editingPlanet || editingPlanet.owner === currentUser) && (
+            <>
+              <div>
+                <select className="w-full p-1 border rounded" disabled={editingPlanet && editingPlanet.owner !== currentUser} onChange={(e) => {
+                  const val = e.target.value;
+                  if (val && !form.personalLinks.includes(val)) {
+                    setForm({ ...form, personalLinks: [...form.personalLinks, val] });
+                  }
+                }}>
+                  <option value="">个人参与者</option>
+                  {planetNames.personal.map((name) => (
+                    <option key={name} value={name}>{name}</option>
+                  ))}
+                </select>
+                <div className="flex flex-wrap mt-1">
+                  {form.personalLinks.map((item, idx) => (
+                    <span key={idx} className="bg-gray-300 text-sm m-1 px-2 py-1 rounded">
+                      {item}
+                      <button className="ml-1 text-red-600" onClick={() => {
+                        const updated = form.personalLinks.filter((_, i) => i !== idx);
+                        setForm({ ...form, personalLinks: updated });
+                      }}>×</button>
+                    </span>
+                  ))}
+                </div>
+              </div>
+              <div>
+                <select className="w-full p-1 border rounded mt-2" disabled={editingPlanet && editingPlanet.owner !== currentUser} onChange={(e) => {
+                  const val = e.target.value;
+                  if (val && !form.organizationLinks.includes(val)) {
+                    setForm({ ...form, organizationLinks: [...form.organizationLinks, val] });
+                  }
+                }}>
+                  <option value="">组织参与者</option>
+                  {planetNames.organization.map((name) => (
+                    <option key={name} value={name}>{name}</option>
+                  ))}
+                </select>
+                <div className="flex flex-wrap mt-1">
+                  {form.organizationLinks.map((item, idx) => (
+                    <span key={idx} className="bg-gray-300 text-sm m-1 px-2 py-1 rounded">
+                      {item}
+                      <button className="ml-1 text-red-600" onClick={() => {
+                        const updated = form.organizationLinks.filter((_, i) => i !== idx);
+                        setForm({ ...form, organizationLinks: updated });
+                      }}>×</button>
+                    </span>
+                  ))}
+                </div>
+              </div>
+            </>
+          )}
+
+          {form.type === 'organization' && (!editingPlanet || editingPlanet.owner === currentUser) && (
+            <>
+              <div>
+                <select className="w-full p-1 border rounded" onChange={(e) => {
+                  const val = e.target.value;
+                  if (val && !form.personalLinks.includes(val)) {
+                    setForm({ ...form, personalLinks: [...form.personalLinks, val] });
+                  }
+                }}>
+                  <option value="">组织成员</option>
+                  {planetNames.personal.map((name) => (
+                    <option key={name} value={name}>{name}</option>
+                  ))}
+                </select>
+                <div className="flex flex-wrap mt-1">
+                  {form.personalLinks.map((item, idx) => (
+                    <span key={idx} className="bg-gray-300 text-sm m-1 px-2 py-1 rounded">
+                      {item}
+                      <button className="ml-1 text-red-600" onClick={() => {
+                        const updated = form.personalLinks.filter((_, i) => i !== idx);
+                        setForm({ ...form, personalLinks: updated });
+                      }}>×</button>
+                    </span>
+                  ))}
+                </div>
+              </div>
+              <div>
+                <select className="w-full p-1 border rounded mt-2" onChange={(e) => {
+                  const val = e.target.value;
+                  if (val && !form.projectLinks.includes(val)) {
+                    setForm({ ...form, projectLinks: [...form.projectLinks, val] });
+                  }
+                }}>
+                  <option value="">参与项目</option>
+                  {planetNames.project.map((name) => (
+                    <option key={name} value={name}>{name}</option>
+                  ))}
+                </select>
+                <div className="flex flex-wrap mt-1">
+                  {form.projectLinks.map((item, idx) => (
+                    <span key={idx} className="bg-gray-300 text-sm m-1 px-2 py-1 rounded">
+                      {item}
+                      <button className="ml-1 text-red-600" onClick={() => {
+                        const updated = form.projectLinks.filter((_, i) => i !== idx);
+                        setForm({ ...form, projectLinks: updated });
+                      }}>×</button>
+                    </span>
+                  ))}
+                </div>
+              </div>
+            </>
+          )}
+
+        {editingPlanet ? (editingPlanet.owner === currentUser ? (
+  <div className="flex justify-end space-x-2 pt-2">
+    <button onClick={() => {
+      setPlanets(planets.map(p => p.id === editingPlanet.id ? { ...editingPlanet, ...form } : p));
+      setPlanetNames(prev => ({
+  ...prev,
+  [editingPlanet.type]: prev[editingPlanet.type].map(n =>
+    n === editingPlanet.name ? form.name : n
+  )
+}));
+
+setPlanets(planets.map(p => {
+  const updateLinks = (list) =>
+    list.map(name => name === editingPlanet.name ? form.name : name);
+  return p.id === editingPlanet.id
+    ? { ...editingPlanet, ...form }
+    : {
+        ...p,
+        projectLinks: updateLinks(p.projectLinks || []),
+        organizationLinks: updateLinks(p.organizationLinks || []),
+        personalLinks: updateLinks(p.personalLinks || []),
+      };
+}));
+      setEditingPlanet(null);
+      openEditor('');
+
+      // 删除后同时从当前表单中清除引用
+      setForm(prevForm => ({
+        ...prevForm,
+        projectLinks: prevForm.projectLinks.filter(name => name !== editingPlanet.name),
+        organizationLinks: prevForm.organizationLinks.filter(name => name !== editingPlanet.name),
+        personalLinks: prevForm.personalLinks.filter(name => name !== editingPlanet.name),
+      }));
+
+      // 同步移除所有引用当前名称的下方已选项
+      setPlanets(prev => prev.map(p => ({
+        ...p,
+        projectLinks: (p.projectLinks || []).filter(name => name !== editingPlanet.name),
+        organizationLinks: (p.organizationLinks || []).filter(name => name !== editingPlanet.name),
+        personalLinks: (p.personalLinks || []).filter(name => name !== editingPlanet.name),
+      })));
+
+      setForm(prevForm => ({
+        ...prevForm,
+        projectLinks: prevForm.projectLinks.filter(name => name !== editingPlanet.name),
+        organizationLinks: prevForm.organizationLinks.filter(name => name !== editingPlanet.name),
+        personalLinks: prevForm.personalLinks.filter(name => name !== editingPlanet.name),
+      }));
+
+      // 同步移除下拉列表中所有引用的名称
+      setForm(prevForm => ({
+        ...prevForm,
+        projectLinks: prevForm.projectLinks.filter(name => name !== editingPlanet.name),
+        organizationLinks: prevForm.organizationLinks.filter(name => name !== editingPlanet.name),
+        personalLinks: prevForm.personalLinks.filter(name => name !== editingPlanet.name),
+      }));
+    }} className="px-4 py-1 rounded bg-yellow-500 text-white">保存</button>
+    <button onClick={() => {
+      const updatedPlanets = planets.filter(p => p.id !== editingPlanet.id);
+
+      // 删除后同步清除 form 中的已选标签
+      setForm(prev => ({
+        ...prev,
+        projectLinks: prev.projectLinks.filter(name => name !== editingPlanet.name),
+        organizationLinks: prev.organizationLinks.filter(name => name !== editingPlanet.name),
+        personalLinks: prev.personalLinks.filter(name => name !== editingPlanet.name),
+      }));
+      setPlanets(prev => prev.map(p => ({
+        ...p,
+        projectLinks: (p.projectLinks || []).filter(name => name !== editingPlanet.name),
+        organizationLinks: (p.organizationLinks || []).filter(name => name !== editingPlanet.name),
+        personalLinks: (p.personalLinks || []).filter(name => name !== editingPlanet.name),
+      })).filter(p => p.id !== editingPlanet.id));
+      setPlanetNames(prev => ({
+        ...prev,
+        [editingPlanet.type]: prev[editingPlanet.type].filter(name => name !== editingPlanet.name)
+      }));
+      setEditingPlanet(null);
+      openEditor('');
+    }} className="px-4 py-1 rounded bg-red-600 text-white">删除星球</button>
+  </div>
+) : null
+) : (
+  <div className="flex justify-end space-x-2 pt-2">
+    <button onClick={() => openEditor('')} className="px-4 py-1 rounded bg-gray-400 text-white">取消</button>
+    <button onClick={handleSubmit} className="px-4 py-1 rounded bg-blue-600 text-white">提交</button>
+  </div>
+)}
+        </div>
+      )}
+    </div>
+  );
+};
+
+export default App;
